@@ -1,1 +1,7 @@
-requirements
+numpy
+pandas
+matplotlib
+scikit-learn
+Pillow
+torch
+torchvision

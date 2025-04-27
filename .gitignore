@@ -1,1 +1,45 @@
+# Ignore Python bytecode
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
 
+# Ignore virtual environment directories
+venv/
+env/
+.venv/
+ENV/
+
+# Ignore IDE-specific files (VSCode, PyCharm, etc.)
+.vscode/
+.idea/
+
+# Ignore Jupyter Notebook checkpoints
+.ipynb_checkpoints/
+
+# Ignore system-specific files
+.DS_Store          # macOS
+Thumbs.db          # Windows
+
+# Ignore dependencies folder if any
+node_modules/
+
+# Ignore log files
+*.log
+
+# Ignore environment variables and config files (sensitive information)
+config.py
+.env
+
+# Ignore data and outputs
+data/
+outputs/
+
+# Ignore image files (jpeg, png, etc.)
+*.jpeg
+*.jpg
+*.png
+*.gif
+*.bmp
+*.tiff
+*.webp
