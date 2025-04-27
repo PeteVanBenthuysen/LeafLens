@@ -33,7 +33,11 @@ config.py
 
 # Ignore data and outputs
 data/
-outputs/
+
+# Ignore specific files in the outputs folder
+outputs/splits_cnn*
+outputs/splits_cnn_transformed*
+outputs/splits_rf*
 
 # Ignore image files (jpeg, png, etc.)
 *.jpeg
