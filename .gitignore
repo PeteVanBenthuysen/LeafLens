@@ -9,6 +9,7 @@ venv/
 env/
 .venv/
 ENV/
+venv_leaflens/
 
 # Ignore IDE-specific files (VSCode, PyCharm, etc.)
 .vscode/
@@ -33,13 +34,9 @@ config.py
 
 # Ignore data and outputs
 data/
+outputs/
 
-# Ignore specific files in the outputs folder
-outputs/splits_cnn*
-outputs/splits_cnn_transformed*
-outputs/splits_rf*
-
-# Ignore image files (jpeg, png, etc.)
+# Ignore image and model files
 *.jpeg
 *.jpg
 *.png
@@ -47,3 +44,18 @@ outputs/splits_rf*
 *.bmp
 *.tiff
 *.webp
+*.h5
+*.hdf5
+*.npy
+*.npz
+*.zip
+
+# Ignore model artifacts or compiled Python extensions
+*.egg
+*.egg-info/
+dist/
+build/
+
+# Avoid TensorBoard logs
+logs/
+
