@@ -56,6 +56,9 @@ outputs/
 dist/
 build/
 
-# Avoid TensorBoard logs
+# Ignore TensorBoard logs
 logs/
 
+# Ignore saved models
+*.pb
+saved_model/
