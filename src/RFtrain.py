@@ -15,15 +15,15 @@ from sklearn.metrics import roc_auc_score
 config.RF_SPLITS_DIR = Path("outputs/splits_rf") 
 
 # Load training data
-X_train = np.load(config.RF_SPLITS_DIR / "X_train_pca_resampled.npy")
+X_train = np.load(config.RF_SPLITS_DIR / "X_train_resampled.npy")
 y_train = np.load(config.RF_SPLITS_DIR / "y_train_resampled.npy")
 
 # Load validation data
-X_val = np.load(config.RF_SPLITS_DIR / "X_val_pca.npy")
+X_val = np.load(config.RF_SPLITS_DIR / "X_val.npy")
 y_val = np.load(config.RF_SPLITS_DIR / "y_val.npy")
 
 # Load test data
-X_test = np.load(config.RF_SPLITS_DIR / "X_test_pca.npy")
+X_test = np.load(config.RF_SPLITS_DIR / "X_test.npy")
 y_test = np.load(config.RF_SPLITS_DIR / "y_test.npy")
 
 print("Data loaded successfully.")
@@ -122,10 +122,33 @@ plt.close()
 # Print saved graph path
 print(f"Confusion matrix saved to {confusion_matrix_path}")
 
-# Extract GridSearchCV results
-# Reshape the grid search results into a matrix
-scores_matrix = np.array(grid_search.cv_results_['mean_test_score']).reshape(len(param_grid['n_estimators']),
-                                                                            len(param_grid['max_depth']))
+# Extract GridSearchCV results and create heatmap for n_estimators vs max_depth
+results_df = pd.DataFrame(grid_search.cv_results_)
+
+# Filter for default values of other hyperparameters
+filtered = results_df[
+    (results_df.param_min_samples_split == 2) &
+    (results_df.param_min_samples_leaf == 1) &
+    (results_df.param_max_features == 'sqrt') &
+    (results_df.param_class_weight == 'balanced') &
+    (results_df.param_bootstrap == True)
+]
+
+# Pivot to get mean_test_score matrix
+scores_matrix = filtered.pivot(index='param_n_estimators', columns='param_max_depth', values='mean_test_score')
+
+# Plot and save heatmap
+plt.figure(figsize=(10, 8))
+sns.heatmap(scores_matrix, annot=True, fmt=".4f", cmap='viridis')
+plt.title('GridSearchCV Accuracy: n_estimators vs max_depth')
+plt.xlabel('max_depth')
+plt.ylabel('n_estimators')
+plt.tight_layout()
+
+heatmap_path = config.RF_RESULTS_DIR / "n_estimators_vs_max_depth_heatmap.png"
+plt.savefig(heatmap_path)
+plt.close()
+print(f"Heatmap saved to {heatmap_path}")
 
 # Sort by score
 sorted_indices = np.argsort(grid_search.cv_results_['mean_test_score'])[::-1]  # descending order
@@ -160,7 +183,8 @@ results_metadata = {
     },
     'saved_graphs': {
         'confusion_matrix': confusion_matrix_path.name,
-        'top20_models_plot': top20_plot_path.name
+        'top20_models_plot': top20_plot_path.name,
+        'heatmap': heatmap_path.name
     }
 }
 
