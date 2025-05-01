@@ -9,7 +9,7 @@ import config
 import matplotlib.pyplot as plt
 import seaborn as sns
 from sklearn.metrics import roc_auc_score
-
+import joblib
 
 # Set the path to RF splits directory
 config.RF_SPLITS_DIR = Path("outputs/splits_rf") 
@@ -73,6 +73,11 @@ print(f"Best Cross-Validation Score: {grid_search.best_score_:.4f}")
 # Get the best estimator
 best_rf_model = grid_search.best_estimator_
 
+# Save the best RF model for later testing
+model_save_path = config.RF_RESULTS_DIR / "best_rf_model.joblib"
+joblib.dump(best_rf_model, model_save_path)
+print(f"Best RF model saved to {model_save_path}")
+
 # Evaluate on validation set
 y_val_pred = best_rf_model.predict(X_val)
 
@@ -107,48 +112,15 @@ with open(config.RF_RESULTS_DIR / 'validation_results.json', 'w') as f:
 print(f"Validation results saved to {config.RF_RESULTS_DIR / 'validation_results.json'}")
 
 # Generate and save confusion matrix
-cm = confusion_matrix(y_val, y_val_pred)
-plt.figure(figsize=(8, 6))
-sns.heatmap(cm, annot=True, fmt='d', cmap='Blues', xticklabels=np.unique(y_val), yticklabels=np.unique(y_val))
-plt.title('Confusion Matrix')
-plt.xlabel('Predicted')
-plt.ylabel('Actual')
-
-# Save confusion matrix as PNG
 confusion_matrix_path = config.RF_RESULTS_DIR / 'confusion_matrix.png'
-plt.savefig(confusion_matrix_path)
-plt.close()
+plot_rf_confusion_matrix_train(y_val, y_val_pred, confusion_matrix_path)
 
-# Print saved graph path
-print(f"Confusion matrix saved to {confusion_matrix_path}")
-
-# Extract GridSearchCV results and create heatmap for n_estimators vs max_depth
-results_df = pd.DataFrame(grid_search.cv_results_)
-
-# Filter for default values of other hyperparameters
-filtered = results_df[
-    (results_df.param_min_samples_split == 2) &
-    (results_df.param_min_samples_leaf == 1) &
-    (results_df.param_max_features == 'sqrt') &
-    (results_df.param_class_weight == 'balanced') &
-    (results_df.param_bootstrap == True)
-]
-
-# Pivot to get mean_test_score matrix
-scores_matrix = filtered.pivot(index='param_n_estimators', columns='param_max_depth', values='mean_test_score')
+# Extract and pivot grid search results
+scores_matrix = extract_and_pivot_gridsearch_train(grid_search)
 
 # Plot and save heatmap
-plt.figure(figsize=(10, 8))
-sns.heatmap(scores_matrix, annot=True, fmt=".4f", cmap='viridis')
-plt.title('GridSearchCV Accuracy: n_estimators vs max_depth')
-plt.xlabel('max_depth')
-plt.ylabel('n_estimators')
-plt.tight_layout()
-
 heatmap_path = config.RF_RESULTS_DIR / "n_estimators_vs_max_depth_heatmap.png"
-plt.savefig(heatmap_path)
-plt.close()
-print(f"Heatmap saved to {heatmap_path}")
+plot_rf_heatmap_train(scores_matrix, heatmap_path)
 
 # Sort by score
 sorted_indices = np.argsort(grid_search.cv_results_['mean_test_score'])[::-1]  # descending order
@@ -156,40 +128,16 @@ sorted_scores = np.array(grid_search.cv_results_['mean_test_score'])[sorted_indi
 sorted_params = np.array(grid_search.cv_results_['params'])[sorted_indices]
 
 # Plot top 20 models
-top_k = 20
-plt.figure(figsize=(14, 6))
-plt.plot(range(top_k), sorted_scores[:top_k], marker='o')
-plt.title('Top 20 GridSearchCV Results')
-plt.xlabel('Model Rank')
-plt.ylabel('Mean Cross-Validation Score')
-plt.grid(True)
-plt.xticks(range(top_k), [f"Model {i+1}" for i in range(top_k)], rotation=45)
-plt.tight_layout()
-plt.show()
-
-# Save plot
 top20_plot_path = config.RF_RESULTS_DIR / 'top20_models.png'
-plt.savefig(top20_plot_path)
-plt.close()
+plot_top20_gridsearch_models(sorted_scores, top20_plot_path, top_k=20)
 
 # Prepare metadata to save
-results_metadata = {
-    'best_params': grid_search.best_params_,
-    'best_score': grid_search.best_score_,
-    'param_grid': param_grid,
-    'cv_results_summary': {
-        'mean_test_score': list(grid_search.cv_results_['mean_test_score']),
-        'params': [str(p) for p in grid_search.cv_results_['params']]
-    },
-    'saved_graphs': {
-        'confusion_matrix': confusion_matrix_path.name,
-        'top20_models_plot': top20_plot_path.name,
-        'heatmap': heatmap_path.name
-    }
-}
-
-# Save metadata JSON
-with open(config.RF_RESULTS_DIR / 'gridsearch_metadata.json', 'w') as f:
-    json.dump(results_metadata, f, indent=4)
-
-print(f"\nGridSearch metadata saved to {config.RF_RESULTS_DIR / 'gridsearch_metadata.json'}")
+# Usage example in your RFtrain.py:
+save_rf_gridsearch_metadata_train(
+    grid_search=grid_search,
+    param_grid=param_grid,
+    confusion_matrix_path=confusion_matrix_path,
+    top20_plot_path=top20_plot_path,
+    heatmap_path=heatmap_path,
+    save_dir=config.RF_RESULTS_DIR
+)
