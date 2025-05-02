@@ -21,6 +21,7 @@ from tqdm import tqdm
 
 # TensorFlow / Keras
 import tensorflow as tf
+import tensorflow_probability as tfp
 from tensorflow.keras import layers, models, Input
 from tensorflow.keras.models import Model, Sequential, load_model, clone_model
 from tensorflow.keras.layers import (
@@ -559,7 +560,17 @@ def evaluate_and_visualize_model(model, functional_model, val_generator, history
     output_dir.mkdir(parents=True, exist_ok=True)
     print(f"Results will be saved to: {output_dir}")
 
-    # Save training curves
+    plot_training_curves(history, output_dir)
+    y_true, y_pred, y_pred_probs = generate_predictions(functional_model, val_generator)
+    if y_true is None:
+        return
+
+    plot_confusion_matrix(y_true, y_pred, class_names, output_dir)
+    visualize_predictions(functional_model, val_generator, class_names, output_dir)
+    generate_gradcam_visualizations(functional_model, val_generator, output_dir)
+
+
+def plot_training_curves(history, output_dir):
     print("Plotting training curves...")
     plt.figure(figsize=(12, 5))
     plt.subplot(1, 2, 1)
@@ -578,22 +589,28 @@ def evaluate_and_visualize_model(model, functional_model, val_generator, history
     print("Training curves saved.")
     plt.show()
 
-    # Confusion matrix
-    print("Generating confusion matrix...")
+
+def generate_predictions(functional_model, val_generator):
+    print("Generating predictions...")
     val_generator.reset()
     try:
         y_true = val_generator.classes
         y_pred_probs = functional_model.predict(val_generator)
         y_pred = np.argmax(y_pred_probs, axis=1)
         print("Predictions completed.")
+        return y_true, y_pred, y_pred_probs
     except Exception as e:
         print(f"Failed during prediction: {e}")
-        return
+        return None, None, None
 
+
+def plot_confusion_matrix(y_true, y_pred, class_names, output_dir):
+    print("Generating confusion matrix...")
     cm = confusion_matrix(y_true, y_pred)
-    cm_df = pd.DataFrame(cm, index=class_names, columns=class_names)
-    print("Confusion matrix generated.")
-
+    if class_names is not None:
+        cm_df = pd.DataFrame(cm, index=class_names, columns=class_names)
+    else:
+        cm_df = pd.DataFrame(cm)
     plt.figure(figsize=(10, 8))
     sns.heatmap(cm_df, annot=True, fmt='d', cmap='Blues')
     plt.title('Confusion Matrix')
@@ -604,7 +621,8 @@ def evaluate_and_visualize_model(model, functional_model, val_generator, history
     print("Confusion matrix saved.")
     plt.show()
 
-    # Prediction visualizations
+
+def visualize_predictions(functional_model, val_generator, class_names, output_dir):
     print("Generating prediction visualizations...")
     val_generator.reset()
     try:
@@ -628,12 +646,13 @@ def evaluate_and_visualize_model(model, functional_model, val_generator, history
             plt.imshow(img.astype('float32') / 255.0)
         plt.axis('off')
         color = 'green' if pred_label == true_label else 'red'
-        plt.title(f"{class_names[pred_label]} {pred_probs[pred_label]*100:.1f}% ({class_names[true_label]})", color=color)
-
+        pred_name = class_names[pred_label] if class_names else str(pred_label)
+        true_name = class_names[true_label] if class_names else str(true_label)
+        plt.title(f"{pred_name} {pred_probs[pred_label]*100:.1f}%\nTrue: {true_name}", color=color)
         plt.subplot(4, 4, i * 2 + 2)
         bars = plt.bar(range(len(class_names)), pred_probs, color='gray')
         bars[pred_label].set_color('green')
-        plt.xticks(range(len(class_names)), class_names, rotation=45)
+        plt.xticks(range(len(class_names)), [f"class_{i}" for i in range(len(class_names))], rotation=45)
         plt.ylim(0, 1)
 
     plt.tight_layout()
@@ -641,21 +660,19 @@ def evaluate_and_visualize_model(model, functional_model, val_generator, history
     print("Prediction visualizations saved.")
     plt.show()
 
-    # Grad-CAM visualizations
+
+def generate_gradcam_visualizations(functional_model, val_generator, output_dir, return_overlays=False):
     print("Generating Grad-CAM visualizations...")
     gradcam_dir = output_dir / 'gradcam'
     gradcam_dir.mkdir(exist_ok=True)
 
-    # Find all Conv2D layers
     conv_layers = [layer for layer in functional_model.layers if isinstance(layer, Conv2D)]
-    if len(conv_layers) < 2:
-        return
-
-    # Target the last Conv2D layer for Grad-CAM
-    target_layer = conv_layers[-3]  # Adjust index as needed
+    if not conv_layers:
+        print("No Conv2D layers found for Grad-CAM.")
+        return [] if return_overlays else None
+    target_layer = conv_layers[-1]
     print(f"Using Conv2D layer for Grad-CAM: {target_layer.name}")
 
-    # Use this layer for Grad-CAM
     grad_model = Model(
         inputs=functional_model.input,
         outputs=[functional_model.get_layer(target_layer.name).output, functional_model.output]
@@ -676,30 +693,30 @@ def evaluate_and_visualize_model(model, functional_model, val_generator, history
         conv_outputs = conv_outputs[0]
         heatmap = conv_outputs @ pooled_grads[..., tf.newaxis]
         heatmap = tf.squeeze(heatmap)
-        heatmap = tf.maximum(heatmap, 0) / (tf.math.reduce_max(heatmap) + 1e-8)
+        heatmap = tf.maximum(heatmap, 0)
+        percentile_99 = tfp.stats.percentile(heatmap, 99.0)
+        heatmap = tf.clip_by_value(heatmap, 0, percentile_99)
+        heatmap = heatmap / (percentile_99 + 1e-8)
         return heatmap.numpy()
 
-    print("Generating Grad-CAM heatmaps...")
-    n_display = 3  # Number to display in notebook
-    n_save = 10    # Number to save to folder (can be <= len(indices))
-    for i, idx in enumerate(indices[:n_save]):
+    x_val, _ = next(val_generator)
+    indices = np.random.choice(len(x_val), size=10, replace=False)
+    overlays = []
+    for i, idx in enumerate(indices):
         img = x_val[idx]
         img_array = np.expand_dims(img, axis=0)
         heatmap = make_gradcam_heatmap(img_array)
 
-        # Normalize heatmap to [0, 1]
         heatmap = np.maximum(heatmap, 0)
         if np.max(heatmap) != 0:
             heatmap /= np.max(heatmap)
         else:
             heatmap = np.zeros_like(heatmap)
 
-        # Resize and colorize
         heatmap_resized = cv2.resize(heatmap, (img.shape[1], img.shape[0]), interpolation=cv2.INTER_CUBIC)
         heatmap_uint8 = np.uint8(255 * heatmap_resized)
         heatmap_color = cv2.applyColorMap(heatmap_uint8, cv2.COLORMAP_JET)
 
-        # Prepare original image for overlay (uint8, 0-255)
         if img.dtype == np.float32 and img.max() <= 1.0:
             orig_img = (img * 255).astype(np.uint8)
         elif img.dtype == np.uint8:
@@ -707,28 +724,14 @@ def evaluate_and_visualize_model(model, functional_model, val_generator, history
         else:
             orig_img = np.clip(img * 255, 0, 255).astype(np.uint8)
 
-        # Blend heatmap with original image
         overlay = cv2.addWeighted(orig_img, 0.6, heatmap_color, 0.4, 0)
-
-        # Save the overlay
         cv2.imwrite(str(gradcam_dir / f'gradcam_overlay_{i}.png'), overlay)
-
-        # Display the first n_display overlays in the notebook
-        if i < n_display:
-            plt.figure(figsize=(8, 4))
-            plt.subplot(1, 2, 1)
-            plt.imshow(orig_img)
-            plt.axis('off')
-            plt.title("Original Image")
-            plt.subplot(1, 2, 2)
-            plt.imshow(overlay)
-            plt.axis('off')
-            plt.title("Grad-CAM Overlay")
-            plt.tight_layout()
-            plt.show()
+        if return_overlays:
+            overlays.append(overlay)
 
     print(f"[INFO] Grad-CAM visualizations saved to {gradcam_dir}")
-    plt.show()
+    if return_overlays:
+        return overlays
 
 # Function to build an improved CNN model with L2 + intermediate dropout
 def build_improved_cnn_model(input_shape, num_classes, l2_value=0.0001):
@@ -779,36 +782,39 @@ def tta_predict(model, generator, num_classes, tta_steps=5):
         true_labels.extend(y_batch)
     return np.array(predictions), np.array(true_labels)
 
-def save_cnn_metrics_to_json(output_dir, history, class_names, y_true, y_pred, y_pred_probs, tta_report=None):
-    # Calculate accuracy
-    acc = accuracy_score(y_true, y_pred)
-
-    # One-hot encode true labels for ROC AUC
-    y_true_bin = label_binarize(y_true, classes=range(len(class_names)))
-
-    # Compute multiclass ROC AUC (One-vs-Rest)
-    try:
-        roc_auc = roc_auc_score(y_true_bin, y_pred_probs, multi_class='ovr')
-    except ValueError:
-        roc_auc = None  # In case there aren't enough classes for AUC
-
-    # Assemble metrics
-    result_dict = {
-        "accuracy": acc,
-        "roc_auc": roc_auc,
+def save_cnn_metrics_to_json(
+    output_dir,
+    history,
+    class_names,
+    y_true,
+    y_pred,
+    y_pred_probs,
+    tta_report,
+    non_tta_report=None,
+    y_true_non_tta=None,
+    y_pred_non_tta=None,
+    y_pred_probs_non_tta=None
+):
+    results = {
+        "history": history.history,
         "class_names": class_names,
-        "training_history": {
-            "loss": history.history.get("loss"),
-            "val_loss": history.history.get("val_loss"),
-            "accuracy": history.history.get("accuracy"),
-            "val_accuracy": history.history.get("val_accuracy")
-        },
-        "tta_classification_report": tta_report
+        "tta": {
+            "y_true": y_true.tolist(),
+            "y_pred": y_pred.tolist(),
+            "y_pred_probs": y_pred_probs.tolist(),
+            "classification_report": tta_report,
+        }
     }
-
-    # Save to file
-    with open(Path(output_dir) / "validation_results.json", "w") as f:
-        json.dump(result_dict, f, indent=4)
+    if non_tta_report is not None:
+        results["non_tta"] = {
+            "y_true": y_true_non_tta.tolist() if y_true_non_tta is not None else None,
+            "y_pred": y_pred_non_tta.tolist() if y_pred_non_tta is not None else None,
+            "y_pred_probs": y_pred_probs_non_tta.tolist() if y_pred_probs_non_tta is not None else None,
+            "classification_report": non_tta_report,
+        }
+    with open(Path(output_dir) / "cnn_metrics.json", "w") as f:
+        json.dump(results, f, indent=4)
+    print(f"Saved CNN metrics (TTA and non-TTA) to {Path(output_dir) / 'cnn_tta_vs_non_tta.json'}")
 
 # Function to save model summary, architecture, and weights
 def save_model_summary_arch_weights(model, output_path):
@@ -944,7 +950,7 @@ def plot_prediction_explanation_grid(generator, y_pred_probs, y_pred_labels, cla
     """
     filepaths = generator.filepaths
     true_labels = generator.classes
-    indices = np.arange(min(n_images, len(filepaths)))
+    indices = np.random.choice(len(filepaths), size=min(n_images, len(filepaths)), replace=False)
     n_cols = 2
     n_rows = int(np.ceil(n_images / n_cols))
     plt.figure(figsize=(n_cols * 6, n_rows * 3.5))
@@ -961,10 +967,12 @@ def plot_prediction_explanation_grid(generator, y_pred_probs, y_pred_labels, cla
         plt.subplot(n_rows, n_cols * 2, i * 2 + 1)
         plt.imshow(img)
         plt.axis('off')
-        plt.title(f"{pred_class} {confidence:.1f}% ({true_class})", color=color, fontsize=12)
+        plt.title(f"{pred_class} {confidence:.1f}% (class_{pred_label})\nTrue: {true_class} (class_{true_label})", color=color, fontsize=11)
         # Bar chart
         plt.subplot(n_rows, n_cols * 2, i * 2 + 2)
-        bars = plt.bar(class_names, pred_prob, color=["green" if j == pred_label else "gray" for j in range(len(class_names))])
+        bars = plt.bar(range(len(class_names)), pred_prob, color=["green" if j == pred_label else "gray" for j in range(len(class_names))])
+        plt.xticks(range(len(class_names)), range(len(class_names)))
+        plt.xlabel("Class #")
         plt.ylim(0, 1)
         plt.xticks(rotation=45, ha='right')
         plt.tight_layout()

@@ -13,3 +13,5 @@ jupyter
 notebook
 tqdm
 seaborn
+tensorflow-probability
+tensorflow-probability[tf]
